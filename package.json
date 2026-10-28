@@ -1,0 +1,16 @@
+{
+  "name": "pi-extension-screenshot-context",
+  "version": "0.1.0",
+  "description": "Opt-in, task-scoped phone screenshot context for Pi without deleting history",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "files": ["index.ts", "context.ts", "README.md"],
+  "pi": { "extensions": ["./index.ts"] },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-agent-core": "*"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/*.test.mjs"
+  }
+}
