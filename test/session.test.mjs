@@ -8,7 +8,7 @@ import { harness, shot, countImages } from './harness.mjs';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 
 // Real AgentSession and Agent loop; replace only the paid/network model transport.
-for (const retry of [false, true]) test(`real session preserves disk history and queue boundary${retry ? ' across automatic retry' : ''}`, async () => {
+for (const retry of [false, true]) test(`real session preserves disk history and pending screenshot filtering${retry ? ' across automatic retry' : ''}`, async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'screenshot-session-'));
   let session;
   try {
@@ -37,7 +37,7 @@ for (const retry of [false, true]) test(`real session preserves disk history and
           tools++;
           if (tools === 1) {
             await session.steer('steer current task');
-            await session.followUp('queued next task, compatibility mode shares boundary');
+            await session.followUp('queued follow-up');
           }
           return { content: shot(id).content, details: { bytes: 3 } };
         },
@@ -65,10 +65,10 @@ for (const retry of [false, true]) test(`real session preserves disk history and
     await session.bindExtensions({ mode: 'rpc', uiContext: { notify() {} } });
     await session.prompt('/screenshot-context on');
     await session.prompt('inspect phone');
-    assert.deepEqual(counts, retry ? [0, 1, 1, 2, 2, 3] : [0, 1, 2, 2, 3]);
+    assert.deepEqual(counts, retry ? [0, 1, 1, 1, 0, 1] : [0, 1, 1, 0, 1]);
     assert.equal(countImages(manager.buildSessionProjection().messages), 3);
     await session.prompt('text-only next question');
-    assert.deepEqual(counts, retry ? [0, 1, 1, 2, 2, 3, 0] : [0, 1, 2, 2, 3, 0]);
+    assert.deepEqual(counts, retry ? [0, 1, 1, 1, 0, 1, 0] : [0, 1, 1, 0, 1, 0]);
     assert.equal(countImages(manager.buildSessionProjection().messages), 3);
     const disk = await readFile(manager.getSessionFile(), 'utf8');
     assert.equal(disk.split('\n').filter(line => line.includes('"type":"image"')).length, 3);

@@ -1,7 +1,7 @@
 {
   "name": "pi-extension-screenshot-context",
-  "version": "0.1.0",
-  "description": "Opt-in, task-scoped phone screenshot context for Pi without deleting history",
+  "version": "0.2.0",
+  "description": "Send only pending phone screenshots to Pi models without deleting history",
   "type": "module",
   "keywords": ["pi-package"],
   "files": ["index.ts", "context.ts", "README.md"],

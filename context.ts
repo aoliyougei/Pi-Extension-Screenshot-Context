@@ -1,14 +1,13 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
-/** Project only request content; source history remains intact. */
-export function projectScreenshotContext(
-  messages: AgentMessage[],
-  historicalCallIds: ReadonlySet<string>,
-): AgentMessage[] {
-  return messages.map((message) => {
+/** Only complete successful responses consume images; interrupted requests remain retryable. */
+export function projectScreenshotContext(messages: AgentMessage[]): AgentMessage[] {
+  const consumedThrough = messages.findLastIndex((message) =>
+    message.role === "assistant" && (message.stopReason === "stop" || message.stopReason === "toolUse"));
+  return messages.map((message, index) => {
     if (
-      message.role !== "toolResult" || message.toolName !== "phone_screenshot" ||
-      !historicalCallIds.has(message.toolCallId) || !message.content.some((block) => block.type === "image")
+      index >= consumedThrough || message.role !== "toolResult" || message.toolName !== "phone_screenshot" ||
+      !message.content.some((block) => block.type === "image")
     ) return message;
     return {
       ...message,
