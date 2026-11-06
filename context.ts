@@ -6,13 +6,13 @@ export function projectScreenshotContext(messages: AgentMessage[]): AgentMessage
     message.role === "assistant" && (message.stopReason === "stop" || message.stopReason === "toolUse"));
   return messages.map((message, index) => {
     if (
-      index >= consumedThrough || message.role !== "toolResult" || message.toolName !== "phone_screenshot" ||
-      !message.content.some((block) => block.type === "image")
+      index >= consumedThrough || !["user", "toolResult", "custom"].includes(message.role) ||
+      !Array.isArray(message.content) || !message.content.some((block) => block.type === "image")
     ) return message;
     return {
       ...message,
       content: message.content.map((block) => block.type === "image"
-        ? { type: "text" as const, text: "[历史手机截图已省略；文字记录保留。]" }
+        ? { type: "text" as const, text: "[历史图片已省略；文字记录保留。]" }
         : block),
     };
   });

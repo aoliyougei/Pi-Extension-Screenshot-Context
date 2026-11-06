@@ -47,6 +47,32 @@ test('image-only expired result has marker and projection is idempotent', () => 
   assert.deepEqual(projectScreenshotContext(once), once);
 });
 
+for (const role of ['user', 'toolResult', 'custom']) {
+  for (const format of ['data', 'source']) test(`filters consumed ${role} ${format} images without altering text or source`, () => {
+    const block = format === 'data' ? image : { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'AAAA' } };
+    const message = { role, toolName: 'arbitrary_new_tool', toolCallId: 'fixture', content: [{ type: 'text', text: 'keep me' }, block], timestamp: 1 };
+    const messages = freeze([message, response('stop'), { ...message, content: [block] }]);
+    const before = JSON.stringify(messages);
+    const result = projectScreenshotContext(messages);
+    assert.equal(countImages(result), 1);
+    assert.deepEqual(result[0].content[0], { type: 'text', text: 'keep me' });
+    assert.equal(result[2], messages[2]);
+    assert.equal(JSON.stringify(messages), before);
+  });
+}
+
+for (const reason of ['error', 'aborted', 'length', 'pending', 'deferred']) test(`non-phone inputs survive ${reason} retry`, () => {
+  const messages = [{ ...shot('read'), toolName: 'read' }, { role: 'user', content: [image] }, response(reason)];
+  assert.equal(countImages(projectScreenshotContext(messages)), 2);
+  assert.equal(countImages(projectScreenshotContext([...messages, response('stop')])), 0);
+});
+
+test('does not redact base64 inside text or assistant-generated image output', () => {
+  const text = 'data:image/jpeg;base64,AAAA';
+  const messages = [{ role: 'user', content: text }, { role: 'assistant', content: [image], stopReason: 'stop' }];
+  assert.deepEqual(projectScreenshotContext(messages), messages);
+});
+
 test('synthetic accumulated image bytes removed while current batch retained', () => {
   const old = Array.from({ length: 30 }, (_, i) => ({ ...shot(`old-${i}`), content: [{ ...image, data: 'A'.repeat(100000) }] }));
   const messages = [...old, response('stop'), shot('current-1'), shot('current-2')];

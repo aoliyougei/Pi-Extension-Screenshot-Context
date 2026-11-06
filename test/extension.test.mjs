@@ -27,7 +27,7 @@ test('enable filters consumed images, keeps pending images, off restores origina
   assert.equal(countImages(await h.project(source(h))), 0);
   await h.command('off');
   assert.equal(countImages(await h.project(source(h))), 2);
-  assert.match(h.notifications.at(-1).text, /历史.*截图/);
+  assert.match(h.notifications.at(-1).text, /历史.*图片/);
 });
 
 test('no lifecycle task markers, queue distinction or per-send counters needed', async () => {
@@ -69,6 +69,20 @@ test('old enabled settings retained, obsolete task entries ignored, resume prese
   assert.equal(countImages(await resumed.project(source(resumed))), 1);
   h.manager.appendMessage(success);
   assert.equal(countImages(await resumed.project(source(resumed))), 0);
+});
+
+test('existing enabled settings cover read/user images and disabling restores all source images', async () => {
+  const h = await harness();
+  h.manager.appendCustomEntry('screenshot-context-settings', { version: 1, enabled: true });
+  h.manager.appendMessage({ ...shot('read'), toolName: 'read' });
+  h.manager.appendMessage({ role: 'user', content: shot('attachment').content, timestamp: 1 });
+  h.manager.appendMessage(success);
+  assert.equal(countImages(await h.project(source(h))), 0);
+  await h.command('status');
+  assert.match(h.notifications.at(-1).text, /用户.*工具/);
+  await h.command('off');
+  assert.equal(countImages(await h.project(source(h))), 2);
+  assert.equal(countImages(source(h)), 2);
 });
 
 test('active branch and compaction projection determine settings and consumption', async () => {

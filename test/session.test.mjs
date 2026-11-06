@@ -8,12 +8,12 @@ import { harness, shot, countImages } from './harness.mjs';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 
 // Real AgentSession and Agent loop; replace only the paid/network model transport.
-for (const retry of [false, true]) test(`real session preserves disk history and pending screenshot filtering${retry ? ' across automatic retry' : ''}`, async () => {
+for (const toolName of ['phone_screenshot', 'read']) for (const retry of [false, true]) test(`real ${toolName} session preserves disk history and pending image filtering${retry ? ' across automatic retry' : ''}`, async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'screenshot-session-'));
   let session;
   try {
     const manager = SessionManager.create(cwd, join(cwd, 'sessions'));
-    const settings = SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: retry, maxRetries: 1, baseDelayMs: 1 } });
+    const settings = SettingsManager.inMemory({ images: { autoResize: false }, compaction: { enabled: false }, retry: { enabled: retry, maxRetries: 1, baseDelayMs: 1 } });
     const runtime = await ModelRuntime.create({ modelsPath: null, modelsStorePath: join(cwd, 'models-store.json'), authPath: join(cwd, 'auth.json'), refreshOnCreate: false });
     runtime.registerProvider('local-test', {
       baseUrl: 'http://unused.invalid', apiKey: 'local-test-fixture', api: 'openai-completions',
@@ -29,9 +29,9 @@ for (const retry of [false, true]) test(`real session preserves disk history and
     ({ session } = await createAgentSession({
       cwd, agentDir: join(cwd, 'agent'), sessionManager: manager, settingsManager: settings,
       modelRuntime: runtime, model: runtime.getModel('local-test', 'deterministic'), thinkingLevel: 'off',
-      resourceLoader: loader, tools: ['phone_screenshot'],
+      resourceLoader: loader, tools: [toolName],
       customTools: [{
-        name: 'phone_screenshot', label: 'Screenshot', description: 'Local fixture',
+        name: toolName, label: 'Image', description: 'Local fixture',
         parameters: { type: 'object', properties: {} },
         async execute(id) {
           tools++;
@@ -55,7 +55,7 @@ for (const retry of [false, true]) test(`real session preserves disk history and
         role: 'assistant', api: model.api, provider: model.provider, model: model.id,
         timestamp: Date.now(), stopReason: failed ? 'error' : call ? 'toolUse' : 'stop',
         ...(failed ? { errorMessage: '503 Service Unavailable' } : {}),
-        content: call ? [{ type: 'toolCall', id: `shot-${n}`, name: 'phone_screenshot', arguments: {} }] : [{ type: 'text', text: 'analysis complete' }],
+        content: call ? [{ type: 'toolCall', id: `shot-${n}`, name: toolName, arguments: {} }] : [{ type: 'text', text: 'analysis complete' }],
         usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
       };
       const stream = createAssistantMessageEventStream();
@@ -78,6 +78,11 @@ for (const retry of [false, true]) test(`real session preserves disk history and
     assert.equal(countImages(await restored.project(reopened.buildSessionProjection().messages)), 0);
     assert.ok(session.messages.some(m => m.role === 'assistant' && m.content.some(b => b.type === 'text' && b.text === 'analysis complete')));
     assert.equal(tools, 3);
+    await session.prompt('inspect uploaded image', { images: [{ type: 'image', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aY1sAAAAASUVORK5CYII=', mimeType: 'image/png' }] });
+    assert.equal(counts.at(-1), 1);
+    await session.prompt('text after image');
+    assert.equal(counts.at(-1), 0);
+    assert.equal(countImages(manager.buildSessionProjection().messages), 4);
   } finally {
     if (session) { await session.abort(); session.dispose(); }
     await rm(cwd, { recursive: true, force: true });
