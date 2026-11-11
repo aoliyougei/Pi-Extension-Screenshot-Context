@@ -8,7 +8,7 @@ import { harness, shot, countImages } from './harness.mjs';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 
 // Real AgentSession and Agent loop; replace only the paid/network model transport.
-for (const toolName of ['phone_screenshot', 'read']) for (const retry of [false, true]) test(`real ${toolName} session preserves disk history and pending image filtering${retry ? ' across automatic retry' : ''}`, async () => {
+for (const toolName of ['phone_screenshot', 'read']) for (const retry of [false, true]) test(`real ${toolName} session preserves disk history and conservative retention without provider payload hooks${retry ? ' across automatic retry' : ''}`, async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'screenshot-session-'));
   let session;
   try {
@@ -65,23 +65,23 @@ for (const toolName of ['phone_screenshot', 'read']) for (const retry of [false,
     await session.bindExtensions({ mode: 'rpc', uiContext: { notify() {} } });
     await session.prompt('/screenshot-context on');
     await session.prompt('inspect phone');
-    assert.deepEqual(counts, retry ? [0, 1, 1, 1, 0, 1] : [0, 1, 1, 0, 1]);
+    assert.deepEqual(counts, retry ? [0, 1, 1, 2, 2, 3] : [0, 1, 2, 2, 3]);
     assert.equal(countImages(manager.buildSessionProjection().messages), 3);
     await session.prompt('text-only next question');
-    assert.deepEqual(counts, retry ? [0, 1, 1, 1, 0, 1, 0] : [0, 1, 1, 0, 1, 0]);
+    assert.deepEqual(counts, retry ? [0, 1, 1, 2, 2, 3, 3] : [0, 1, 2, 2, 3, 3]);
     assert.equal(countImages(manager.buildSessionProjection().messages), 3);
     const disk = await readFile(manager.getSessionFile(), 'utf8');
     assert.equal(disk.split('\n').filter(line => line.includes('"type":"image"')).length, 3);
     const reopened = SessionManager.open(manager.getSessionFile());
     assert.equal(countImages(reopened.buildSessionProjection().messages), 3);
     const restored = await harness(reopened);
-    assert.equal(countImages(await restored.project(reopened.buildSessionProjection().messages)), 0);
+    assert.equal(countImages(await restored.project(reopened.buildSessionProjection().messages)), 3);
     assert.ok(session.messages.some(m => m.role === 'assistant' && m.content.some(b => b.type === 'text' && b.text === 'analysis complete')));
     assert.equal(tools, 3);
     await session.prompt('inspect uploaded image', { images: [{ type: 'image', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aY1sAAAAASUVORK5CYII=', mimeType: 'image/png' }] });
-    assert.equal(counts.at(-1), 1);
+    assert.equal(counts.at(-1), 4);
     await session.prompt('text after image');
-    assert.equal(counts.at(-1), 0);
+    assert.equal(counts.at(-1), 4);
     assert.equal(countImages(manager.buildSessionProjection().messages), 4);
   } finally {
     if (session) { await session.abort(); session.dispose(); }

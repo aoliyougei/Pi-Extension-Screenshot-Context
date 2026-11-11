@@ -1,82 +1,58 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { projectScreenshotContext } from '../context.ts';
+import { identifyImages, imageHash, payloadImageHashes, projectScreenshotContext } from '../context.ts';
 import { shot, image, countImages } from './harness.mjs';
-const response = stopReason => ({ role: 'assistant', stopReason, content: [{ type: 'text', text: 'analysis' }], timestamp: 2 });
-const freeze = value => { if (value && typeof value === 'object') { Object.values(value).forEach(freeze); Object.freeze(value); } return value; };
 
-test('only pending screenshot batch remains, preserving frozen source, text, metadata and other images', () => {
-  const messages = freeze([shot('old'), response('toolUse'), shot('a'), shot('b'), { ...shot('read'), toolName: 'read' }, { role: 'user', content: [image] }]);
+const fixture = () => {
+  const messages = [shot('a'), { role: 'user', content: [image], timestamp: 2 }];
+  const branch = messages.map((message, i) => ({ type: 'message', id: `entry-${i}`, message }));
+  return { messages, branch };
+};
+
+test('later assistant success never consumes an image without an explicit receipt', () => {
+  const { messages, branch } = fixture();
+  messages.push({ role: 'assistant', stopReason: 'stop', content: [], timestamp: 3 });
+  const images = identifyImages(messages, branch);
+  assert.equal(countImages(projectScreenshotContext(messages, images)), 2);
+  assert.equal(countImages(projectScreenshotContext(projectScreenshotContext(messages, images), images)), 2);
+});
+
+test('receipts target exact message instances and blocks, preserve metadata and original history', () => {
+  const { messages, branch } = fixture();
+  const images = identifyImages(messages, branch);
   const before = JSON.stringify(messages);
-  const result = projectScreenshotContext(messages);
-  assert.equal(countImages(result), 4);
-  assert.equal(result[0].content.some(b => b.type === 'image'), false);
+  const result = projectScreenshotContext(messages, images, new Set([images[0].id]));
+  assert.equal(countImages(result), 1);
+  assert.equal(result[0].toolCallId, 'a');
   assert.deepEqual(result[0].content[0], messages[0].content[0]);
-  assert.ok(result[0].content.some(b => b.type === 'text' && b.text.includes('历史')));
-  const { content, ...metadata } = result[0];
-  const { content: original, ...expected } = messages[0];
-  assert.deepEqual(metadata, expected);
-  assert.equal(result[2], messages[2]);
-  assert.equal(result[4], messages[4]);
+  assert.match(result[0].content[1].text, /不代表已保存图片识别结果/);
   assert.equal(JSON.stringify(messages), before);
 });
 
-for (const reason of ['stop', 'toolUse']) test(`successful ${reason} consumes previous screenshots, including same task`, () => {
-  assert.equal(countImages(projectScreenshotContext([shot('a'), shot('b'), response(reason)])), 0);
-});
-for (const reason of ['error', 'aborted', 'length', 'pending', 'deferred', undefined]) test(`${reason} does not consume pending screenshots`, () => {
-  assert.equal(countImages(projectScreenshotContext([shot('a'), response(reason)])), 1);
-});
-
-test('retry after errors keeps only pending batch, not previously consumed screenshots', () => {
-  const messages = [shot('old'), response('stop'), shot('pending'), response('error'), response('aborted')];
-  assert.equal(countImages(projectScreenshotContext(messages)), 1);
-  assert.equal(countImages(projectScreenshotContext([...messages, response('stop')])), 0);
+test('same bytes and same path reread with a new call ID is a new image instance', () => {
+  const a = shot('first'), b = shot('second');
+  const images = identifyImages([a, b], [{ type: 'message', id: 'a', message: a }, { type: 'message', id: 'b', message: b }]);
+  assert.notEqual(images[0].id, images[1].id);
+  assert.equal(countImages(projectScreenshotContext([a, b], images, new Set([images[0].id]))), 1);
 });
 
-test('user/queue messages and reused IDs do not decide image lifetime', () => {
-  const messages = [shot('same'), response('stop'), { role: 'user', content: 'next' }, shot('same')];
-  assert.equal(countImages(projectScreenshotContext(messages)), 1);
+test('unmapped or modified images remain pending rather than guessed', () => {
+  const { messages, branch } = fixture();
+  const changed = structuredClone(messages);
+  changed[0].content[1].data = 'BBBB';
+  assert.equal(identifyImages(changed, branch).length, 1);
+  assert.equal(identifyImages(messages, []).length, 0);
 });
 
-test('image-only expired result has marker and projection is idempotent', () => {
-  const messages = [{ ...shot('old'), content: [image] }, response('stop')];
-  const once = projectScreenshotContext(messages);
-  assert.equal(once[0].content.length, 1);
-  assert.equal(once[0].content[0].type, 'text');
-  assert.deepEqual(projectScreenshotContext(once), once);
+for (const payload of [
+  { messages: [{ content: [{ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,AAAA' } }] }] },
+  { input: [{ content: [{ type: 'input_image', image_url: 'data:image/jpeg;base64,AAAA' }] }] },
+  { messages: [{ content: [{ type: 'image', source: { type: 'base64', data: 'AAAA' } }] }] },
+  { contents: [{ parts: [{ inlineData: { mimeType: 'image/jpeg', data: 'AAAA' } }] }] },
+]) test('recognizes a standard inline provider image without storing base64', () => {
+  assert.equal(payloadImageHashes(payload).get(imageHash('AAAA')), 1);
 });
 
-for (const role of ['user', 'toolResult', 'custom']) {
-  for (const format of ['data', 'source']) test(`filters consumed ${role} ${format} images without altering text or source`, () => {
-    const block = format === 'data' ? image : { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'AAAA' } };
-    const message = { role, toolName: 'arbitrary_new_tool', toolCallId: 'fixture', content: [{ type: 'text', text: 'keep me' }, block], timestamp: 1 };
-    const messages = freeze([message, response('stop'), { ...message, content: [block] }]);
-    const before = JSON.stringify(messages);
-    const result = projectScreenshotContext(messages);
-    assert.equal(countImages(result), 1);
-    assert.deepEqual(result[0].content[0], { type: 'text', text: 'keep me' });
-    assert.equal(result[2], messages[2]);
-    assert.equal(JSON.stringify(messages), before);
-  });
-}
-
-for (const reason of ['error', 'aborted', 'length', 'pending', 'deferred']) test(`non-phone inputs survive ${reason} retry`, () => {
-  const messages = [{ ...shot('read'), toolName: 'read' }, { role: 'user', content: [image] }, response(reason)];
-  assert.equal(countImages(projectScreenshotContext(messages)), 2);
-  assert.equal(countImages(projectScreenshotContext([...messages, response('stop')])), 0);
-});
-
-test('does not redact base64 inside text or assistant-generated image output', () => {
-  const text = 'data:image/jpeg;base64,AAAA';
-  const messages = [{ role: 'user', content: text }, { role: 'assistant', content: [image], stopReason: 'stop' }];
-  assert.deepEqual(projectScreenshotContext(messages), messages);
-});
-
-test('synthetic accumulated image bytes removed while current batch retained', () => {
-  const old = Array.from({ length: 30 }, (_, i) => ({ ...shot(`old-${i}`), content: [{ ...image, data: 'A'.repeat(100000) }] }));
-  const messages = [...old, response('stop'), shot('current-1'), shot('current-2')];
-  const result = projectScreenshotContext(messages);
-  assert.equal(countImages(result), 2);
-  assert.ok(Buffer.byteLength(JSON.stringify(result)) < Buffer.byteLength(JSON.stringify(messages)) / 100);
+test('base64 text and unknown payload formats do not count as image receipt evidence', () => {
+  assert.equal(payloadImageHashes({ text: 'data:image/jpeg;base64,AAAA', data: 'AAAA' }).size, 0);
 });

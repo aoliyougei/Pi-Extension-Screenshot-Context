@@ -1,7 +1,7 @@
 {
   "name": "pi-extension-screenshot-context",
-  "version": "0.3.0",
-  "description": "Send only pending input images from users and any tool to Pi models, preserving history",
+  "version": "0.4.0-rc.1",
+  "description": "Receipt-based input image context filtering for Pi, preserving complete history",
   "type": "module",
   "keywords": ["pi-package"],
   "files": ["index.ts", "context.ts", "README.md"],
