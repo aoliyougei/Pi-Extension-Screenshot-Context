@@ -2,9 +2,9 @@
 
 独立 Pi 扩展，用请求观察记录控制历史输入图片过滤，保留全部原始历史和文字。不改 Pi/RPC/Web 或原图片工具，不增加模型调用。
 
-## 0.4.0 预发布：待手动验证
+## 0.4.0 正式版：工具链图片保留修复
 
-**当前改动未执行测试或类型检查，不是已验证的发布版本。** 此前测试镜像不可用，本次按用户要求直接修改代码，由用户手动测试。没有自动安装、推送或创建标签。
+**根据用户手动验证确认，发布为正式版 0.4.0。** 用户反馈安装副本的最小修复已通过26项非安装测试和实际任务验收，并确认此方式可用。维护助手未在本源码目录重新执行测试、安装测试或类型检查；配置的 Docker daemon 中没有可用 RPC 测试镜像，未在本地绕过执行边界。上述验证结果属于用户反馈，不代表完整自动化套件已由维护助手复验。
 
 ## 安装与命令
 
@@ -31,8 +31,8 @@ pi install /app/Pi-Extension-Screenshot-Context
 2. 在 context 中通过来源消息条目 ID、图片块序号、内容 SHA-256 标识实例。重新读同一路径产生新的条目，所以重新发送。哈希不是去重依据。
 3. 仅省略有本分支 receipt 的实例。图片映射不到唯一持久化来源时保守保留，不猜测。
 4. 在 before_provider_request 观察常见供应商载荷中的 inline 图片；仅内存保存候选实例 ID/哈希，不保存第二份 Base64。
-5. 对应 turn_end 的 stopReason 为 stop/toolUse，且分支关联检查通过，才持久化该批图片的 receipt，引用 assistant 条目 ID。
-6. error/aborted/length/pending/deferred、不完整关联或同次 context 多个载荷回调不写 receipt。重试图片继续保留。
+5. 对应 turn_end 的 stopReason **必须为 stop**，且分支关联检查通过，才持久化该批图片的 receipt，引用 assistant 条目 ID。toolUse 不写新回执，图片在中间 write/其他工具调用之后仍可用于后续检查。
+6. toolUse/error/aborted/length/pending/deferred、不完整关联或同次 context 多个载荷回调不写 receipt。工具链和重试图片继续保留。
 7. 重复投影本身不会消费图片。恢复/分支切换从当前分支 receipt 重建，旧任务分界条目不再使用。
 
 支持标准 user/toolResult 输入图片，覆盖 phone_screenshot、read 和其他工具。custom 图片只有在能明确映射来源时才记录，通常保守保留。assistant 输出图片和系统消息不改写。普通文字/JSON 内的 Base64 不用正则删除。
@@ -48,7 +48,9 @@ pi install /app/Pi-Extension-Screenshot-Context
 - **升级后无 receipt 的旧图片保守保留，可能在首次成功分析请求中再次集中发送。** 不自动将历史图标记已识别，也不删除原会话或偷偷迁移。长会话升级请空闲时操作，首次请求体可能很大。
 - receipt 失效或相关助手消息不在当前分支中时重新保留图片。扩展未加载、关闭或处理出错时不保证过滤，这不是安全脱敏机制。
 - 独立摘要/压缩请求、后续扩展改写或注入、特殊供应商格式不保证覆盖。原图仍占用会话文件和部分内存，这不是磁盘清理功能。
-- HTTP 200 不是消费成功依据，必须等模型 turn_end 完整成功。
+- HTTP 200 和 toolUse 都不是生成新回执的依据，必须等模型 turn_end 返回 stop。本次修复是延迟到 stop，不是严格 agent_settled：若 stop 后扩展强制继续，图片仍可能已被过滤；需另行验收。
+- 历史 stop/toolUse 回执兼容读取不变，不删除、不迁移旧回执。若旧回执已使图片省略，需要重新读取获得新实例。
+- 长工具链会持续携带更多图片，可能增加请求体积；这换取中间步骤继续检查原图的能力。
 
 ## 手动验收
 
@@ -59,9 +61,9 @@ PI_OFFLINE=1 npm test
 npm pack --dry-run --json
 ```
 
-test/transport.test.mjs 使用真实 Pi SDK/供应商序列化 + 容器 loopback HTTP SSE 替身捕获请求，不调用付费 API。检查同路径重读、新批次、无图后续请求、后续 context 处理器移除图后不写 receipt。扩展单测覆盖失败/多载荷/分支恢复和重复投影。直接替换 streamFunction、没有供应商载荷回调的测试现在应保守保留全部图片，不能据此假称有实际提交证据。
+test/transport.test.mjs 使用真实 Pi SDK/供应商序列化 + 容器 loopback HTTP SSE 替身捕获请求，不调用付费 API。检查同路径重读、新批次、无图后续请求、后续 context 处理器移除图后不写 receipt。扩展单测覆盖失败/多载荷/分支恢复和重复投影。新增 test/tool-chain.test.mjs 验证 toolUse 后保留、stop 后省略、同内容重读及历史 toolUse 回执兼容。直接替换 streamFunction、没有供应商载荷回调的测试现在应保守保留全部图片，不能据此假称有实际提交证据。
 
-请特别验证：首次新图进入实际 HTTP body；成功后省略；同路径重读再次进入；失败后仍携带；恢复和分支不串状态；更晚 before_provider_request 处理器移除图的已知限制。尚未运行本版测试，不能认定这些断言已通过。
+请特别验证：首次新图进入实际 HTTP body；成功后省略；同路径重读再次进入；失败后仍携带；恢复和分支不串状态；更晚 before_provider_request 处理器移除图的已知限制。维护助手尚未运行本源码目录的本版测试，不能认定全部断言已由维护助手复验；正式发布依据为用户提供的验证确认。
 
 ## 卸载
 

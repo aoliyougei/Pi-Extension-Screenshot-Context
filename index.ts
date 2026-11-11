@@ -3,7 +3,7 @@ import { identifyImages, payloadImageHashes, projectScreenshotContext, type Imag
 
 const SETTINGS = "screenshot-context-settings";
 const RECEIPT = "screenshot-context-receipt";
-const POLICY = "覆盖用户及所有工具图片；仅省略有请求载荷观察和成功响应记录的图片，不代表已保存识别结果。";
+const POLICY = "覆盖用户及所有工具图片；工具调用期间保留图片，仅在观察到请求图片且最终 stop 回复后记录消费，不代表已保存识别结果。";
 
 function readState(ctx: ExtensionContext) {
   const branch = ctx.sessionManager.getBranch();
@@ -76,7 +76,7 @@ export default function screenshotContext(pi: ExtensionAPI) {
     const current = request;
     clear();
     if (!current || current.payloadCalls !== 1 || current.session !== ctx.sessionManager.getSessionId() ||
-      event.message.role !== "assistant" || !["stop", "toolUse"].includes(event.message.stopReason) || !current.observed.length) return;
+      event.message.role !== "assistant" || event.message.stopReason !== "stop" || !current.observed.length) return;
     const branch = ctx.sessionManager.getBranch();
     const responseIndex = branch.findIndex(e => e.id === event.messageEntryId);
     const leafIndex = current.leaf === null ? -1 : branch.findIndex(e => e.id === current.leaf);

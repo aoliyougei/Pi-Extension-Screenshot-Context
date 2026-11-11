@@ -1,6 +1,6 @@
 {
   "name": "pi-extension-screenshot-context",
-  "version": "0.4.0-rc.1",
+  "version": "0.4.0",
   "description": "Receipt-based input image context filtering for Pi, preserving complete history",
   "type": "module",
   "keywords": ["pi-package"],
